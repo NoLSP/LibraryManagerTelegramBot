@@ -11,7 +11,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 namespace SpecialLibraryBot.Telegram
 {
-    public class TelegramBot
+    public class TelegramBotManager
     {
         private ILogger logger;
         private List<long> chatIds;
@@ -19,19 +19,19 @@ namespace SpecialLibraryBot.Telegram
         private ITelegramBotClient telegramBotClient;
 
 
-        private static TelegramBot? instance;
-        public static TelegramBot Instance
+        private static TelegramBotManager? instance;
+        public static TelegramBotManager Instance
         {
             get
             {
                 if (instance == null)
-                    instance = new TelegramBot();
+                    instance = new TelegramBotManager();
 
                 return instance;
             }
         }
 
-        private TelegramBot()
+        private TelegramBotManager()
         {
             var token = ConfigurationService.TelegramBotConfiguration.Token;
 
@@ -46,8 +46,13 @@ namespace SpecialLibraryBot.Telegram
         }
 
 
-        public void StartRecieving(CancellationToken cancellationToken)
+        //Main
+
+        public void StartRecieving()
         {
+            var cts = new CancellationTokenSource();
+            var cancellationToken = cts.Token;
+
             var receiverOptions = new ReceiverOptions
             {
                 AllowedUpdates = { }, // receive all update types
@@ -61,7 +66,7 @@ namespace SpecialLibraryBot.Telegram
             );
         }
 
-        public static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+        private static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
             try
             {
@@ -88,11 +93,13 @@ namespace SpecialLibraryBot.Telegram
             }
         }
 
-        public static async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+        private static async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
         {
            Instance.logger.Error(Newtonsoft.Json.JsonConvert.SerializeObject(exception));
         }
 
+
+        //Handlers
 
         private static async Task HandleMessageUpdate(ITelegramBotClient botClient, Message message)
         {
@@ -216,6 +223,43 @@ namespace SpecialLibraryBot.Telegram
         }
 
 
+        //Public methods
+
+        public static async Task<bool> SendPublicationEntity(PublicationEntity publication)
+        {
+            try
+            {
+                var messageText = $"{publication.SocialNetwork} - {publication.Author}\n" +
+                    $"Заголовок: \"{publication.Title}\"\n" +
+                    $"Источник: {publication.Source}";
+
+                foreach (var chatId in Instance.chatIds)
+                {
+                    using (var fileStream = new FileStream(publication.ImageFilePath, FileMode.Open))
+                    {
+                        var file = new InputOnlineFile(fileStream);
+                        var keyboard = GetStandartPublicationKeyboardMurkup(publication.Id);
+                        await Instance.telegramBotClient.SendPhotoAsync(chatId, file, messageText, replyMarkup: keyboard);
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Instance.logger.Error(ex);
+                return false;
+            }
+        }
+
+        public static async Task SendException(string action, string message)
+        {
+            foreach(var chatId in Instance.chatIds)
+                await Instance.telegramBotClient.SendTextMessageAsync(chatId, $"❗Возникла ошибка❗\n\n{action}\n\n{message}");
+        }
+        
+        //Utility
+        
         private static string? ObtainActionResponseText(PublicationEntity publication, InlineKeyboardAction action, bool isActionComplete)
         {
             switch(action)
@@ -232,7 +276,7 @@ namespace SpecialLibraryBot.Telegram
                         return $"Публикация:\n" +
                         $"{publication.SocialNetwork} - {publication.Author}\n" +
                         $"Заголовок: {publication.Title}\n" +
-                        $"Источник: {publication.Source}\n" +
+                        $"Дата публикации: {publication.PublicationDateTime?.ToString("dd.MM HH:mm")}\n" +
                         $"не удалось опубликовать.";
 
                 case InlineKeyboardAction.MoveToAlbum:
@@ -287,34 +331,7 @@ namespace SpecialLibraryBot.Telegram
                     return null;
             }
         }
-
-        public static async Task<bool> SendPublicationEntity(PublicationEntity publication)
-        {
-            try
-            {
-                var messageText = $"{publication.SocialNetwork} - {publication.Author}\n" +
-                    $"Заголовок: \"{publication.Title}\"\n" +
-                    $"Источник: {publication.Source}";
-
-                foreach (var chatId in Instance.chatIds)
-                {
-                    using (var fileStream = new FileStream(publication.ImageFilePath, FileMode.Open))
-                    {
-                        var file = new InputOnlineFile(fileStream);
-                        var keyboard = GetStandartPublicationKeyboardMurkup(publication.Id);
-                        await Instance.telegramBotClient.SendPhotoAsync(chatId, file, messageText, replyMarkup: keyboard);
-                    }
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Instance.logger.Error(ex);
-                return false;
-            }
-        }
-
+        
         private static InlineKeyboardMarkup GetStandartPublicationKeyboardMurkup(string publicationId)
         {
             return new InlineKeyboardMarkup(new List<InlineKeyboardButton[]>

@@ -66,7 +66,7 @@ namespace SpecialLibraryBot
 
         public static async Task RegisterPublicationEntity(PublicationEntity publicationEntity)
         {
-            if (await TelegramBot.SendPublicationEntity(publicationEntity))
+            if (await TelegramBotManager.SendPublicationEntity(publicationEntity))
             {
                 var newImageFilePath = AppDataHelper.MoveToProcessing(publicationEntity.SocialNetwork, publicationEntity.Author, publicationEntity.ImageFilePath);
                 publicationEntity.ImageFilePath = newImageFilePath;
@@ -86,6 +86,9 @@ namespace SpecialLibraryBot
         private static DateTime GetActualPublicationDateTime()
         {
             var publicationDateTime = Instance.LastPublicationDateTime.AddMinutes(Instance.PublicationIntervalMinutes);
+
+            if (publicationDateTime <= DateTime.UtcNow)
+                publicationDateTime = DateTime.UtcNow.AddMinutes(Instance.PublicationIntervalMinutes);
 
             if (!IsDateInActualPublicationPeriod(publicationDateTime))
                 publicationDateTime = GetStartDateTimeInNextPeriod(publicationDateTime);

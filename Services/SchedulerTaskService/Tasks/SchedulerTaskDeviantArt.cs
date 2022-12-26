@@ -1,6 +1,7 @@
 ﻿using NLog;
 using SpecialLibraryBot.DeviantArtApi;
 using SpecialLibraryBot.Helpers;
+using SpecialLibraryBot.Telegram;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -67,28 +68,29 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
 
         public override async Task Execute()
         {
-            try
+            Logger.Info("Start execute.");
+
+            nextExecutionDateTime = DateTime.UtcNow.AddMinutes(executionIntervalMinutes);
+
+            var deviantArtApiClient = DeviantArtApiClient.Instance;
+
+            foreach(var author in Authors)
             {
-                Logger.Info("Start execute.");
-
-                nextExecutionDateTime = DateTime.UtcNow.AddMinutes(executionIntervalMinutes);
-
-                var deviantArtApiClient = DeviantArtApiClient.Instance;
-
-                foreach(var author in Authors)
+                if(!AuthorsLastArtsDates.TryGetValue(author, out var lastArtsDate))
                 {
-                    if(!AuthorsLastArtsDates.TryGetValue(author, out var lastArtsDate))
-                    {
-                        lastArtsDate = LastUpdateDateTime;
-                    }
+                    lastArtsDate = LastUpdateDateTime;
+                }
 
-                    var hasMoreWorks = true;
-                    var pageOffset = 0;
-                    var newLastArtDate = lastArtsDate;
+                var hasMoreWorks = true;
+                var pageOffset = 0;
+                var newLastArtDate = lastArtsDate;
 
+                try
+                {
                     while(hasMoreWorks)
                     {
                         var authorGallary = await deviantArtApiClient.GalleryAll(author, pageOffset: pageOffset);
+
                         if(authorGallary.Results == null)
                         {
                             Logger.Error($"Author ({author}) gallary deviantions was null.");
@@ -142,10 +144,11 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
 
                     AuthorsLastArtsDates[author] = newLastArtDate;
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"{ex.Message}");
+                catch (Exception ex)
+                {
+                    Logger.Error(ex);
+                    await TelegramBotManager.SendException($"Выгрузка автора {author}", ex.Message);
+                }
             }
         }
 

@@ -40,12 +40,8 @@ logger.Info("Initializing Publication Manager...");
 var publicationManager = PublicationManager.Instance;
 
 //Telegram
-var cts = new CancellationTokenSource();
-var cancellationToken = cts.Token;
-
 logger.Info("Starting telegram bot...");
-TelegramBot.Instance.StartRecieving(cancellationToken);
-
+TelegramBotManager.Instance.StartRecieving();
 
 //Scheduler
 logger.Info("Starting schedulers...");
