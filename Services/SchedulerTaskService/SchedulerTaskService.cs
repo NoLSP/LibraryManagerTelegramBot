@@ -36,6 +36,7 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
             tasks.Add(SchedulerTaskDeviantArt.Instance);
             tasks.Add(SchedulerTaskBackup.Instance);
             tasks.Add(SchedulerTaskAlbumLoader.Instance);
+            tasks.Add(SchedulerTaskOnModerationPublicationsClear.Instance);
         }
 
         public async Task Start()

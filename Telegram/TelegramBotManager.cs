@@ -200,7 +200,7 @@ namespace SpecialLibraryBot.Telegram
                 switch (action)
                 {
                     case InlineKeyboardAction.NotPublicate:
-                        PublicationManager.DeletePublication(publication);
+                        PublicationManager.DeletePublication(publication, true);
                         isActionComplete = true;
                         break;
                     case InlineKeyboardAction.Publicate:

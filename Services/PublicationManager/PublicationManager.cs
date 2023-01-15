@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Ical.Net.CalendarComponents;
+using Ical.Net.DataTypes;
+using Microsoft.Extensions.Configuration;
 using NLog;
 using SpecialLibraryBot.Helpers;
 using SpecialLibraryBot.Services;
@@ -6,6 +8,7 @@ using SpecialLibraryBot.Telegram;
 using SpecialLibraryBot.VK;
 using System;
 using System.Collections.Generic;
+using System.Data.SqlTypes;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -71,10 +74,12 @@ namespace SpecialLibraryBot
                 var newImageFilePath = AppDataHelper.MoveToProcessing(publicationEntity.SocialNetwork, publicationEntity.Author, publicationEntity.ImageFilePath);
                 publicationEntity.ImageFilePath = newImageFilePath;
                 publicationEntity.State = PublicationState.Moderation;
+                publicationEntity.StateDateTime = DateTime.UtcNow;
             }
             else
             {
                 publicationEntity.State = PublicationState.Downloaded;
+                publicationEntity.StateDateTime = DateTime.UtcNow;
             }
 
             Instance.Publications.Add(publicationEntity.Id, publicationEntity);
@@ -85,24 +90,60 @@ namespace SpecialLibraryBot
         
         private static DateTime GetActualPublicationDateTime()
         {
-            var publicationDateTime = Instance.LastPublicationDateTime.AddMinutes(Instance.PublicationIntervalMinutes);
+            if (Instance.LastPublicationDateTime.Date < DateTime.UtcNow.Date)
+                Instance.LastPublicationDateTime = DateTime.UtcNow;
 
-            if (publicationDateTime <= DateTime.UtcNow)
-                publicationDateTime = DateTime.UtcNow.AddMinutes(Instance.PublicationIntervalMinutes);
+            var publicationDateTime = (DateTime?)Instance.LastPublicationDateTime.AddMinutes(Instance.PublicationIntervalMinutes);
 
-            if (!IsDateInActualPublicationPeriod(publicationDateTime))
-                publicationDateTime = GetStartDateTimeInNextPeriod(publicationDateTime);
+            if (!IsDateInActualPublicationPeriod(publicationDateTime.Value))
+            {
+                publicationDateTime = GetOccurrence(Instance.LastPublicationDateTime, Instance.StartPublicationTime, Instance.EndPublicationTime, Instance.PublicationIntervalMinutes, out var reason);//GetStartDateTimeInNextPeriod(publicationDateTime);
+                if (publicationDateTime == null)
+                    throw new Exception($"Could not get next publication datetime. LastPublicationDateTime = {Instance.LastPublicationDateTime}, StartTime = {Instance.StartPublicationTime}, EndTime = {Instance.EndPublicationTime}, IntervalMinutes = {Instance.PublicationIntervalMinutes}");
+            }
 
-            return publicationDateTime;
+            return publicationDateTime.Value;
         }
 
-        private static DateTime GetStartDateTimeInNextPeriod(DateTime date)
+        static DateTime? GetOccurrence(DateTime lastPublicationDateTime, TimeOnly startTime, TimeOnly endTime, int intervalMinutes, out string reason)
         {
-            var startTime = Instance.StartPublicationTime;
-            date = TimeOnly.FromDateTime(date) <= startTime ? date : date.AddDays(1);
-            var dateTime = new DateTime(date.Year, date.Month, date.Day, startTime.Hour, startTime.Minute, startTime.Second);
+            var startDateTime = lastPublicationDateTime;
+            var endDateTime = startDateTime.AddMonths(1);
 
-            return dateTime;
+            var recurenceRule = new RecurrencePattern(Ical.Net.FrequencyType.Minutely, intervalMinutes);
+
+            while (startDateTime <= endDateTime)
+            {
+                var vEvent = new CalendarEvent
+                {
+                    Start = new CalDateTime(new DateTime(startDateTime.Year, startDateTime.Month, startDateTime.Day, startTime.Hour, startTime.Minute, startTime.Second)),
+                    End = new CalDateTime(new DateTime(startDateTime.Year, startDateTime.Month, startDateTime.Day, endTime.Hour, endTime.Minute, endTime.Second)),
+                    RecurrenceRules = new List<RecurrencePattern>() { recurenceRule }
+                };
+
+                //Получаем события для текущего дня
+                var occurrences = vEvent.GetOccurrences(startDateTime, endDateTime)
+                    .Where(x => new TimeOnly(x.Period.StartTime.Hour, x.Period.StartTime.Minute, x.Period.StartTime.Second) >= startTime &&
+                        new TimeOnly(x.Period.StartTime.Hour, x.Period.StartTime.Minute, x.Period.StartTime.Second) <= endTime)
+                    .ToList();
+
+                foreach (var occurrence in occurrences)
+                {
+                    var occurrDateTime = new DateTime(occurrence.Period.StartTime.Year, occurrence.Period.StartTime.Month, occurrence.Period.StartTime.Day,
+                        occurrence.Period.StartTime.Hour, occurrence.Period.StartTime.Minute, occurrence.Period.StartTime.Second);
+
+                    if (occurrDateTime > lastPublicationDateTime && occurrDateTime > DateTime.UtcNow)
+                    {
+                        reason = "";
+                        return occurrDateTime;
+                    }
+                }
+
+                startDateTime.AddDays(1);
+            }
+
+            reason = "Occurences not found";
+            return null;
         }
 
         private static bool IsDateInActualPublicationPeriod(DateTime date)
@@ -132,21 +173,21 @@ namespace SpecialLibraryBot
         }
 
 
-        public static bool DeletePublication(PublicationEntity publication)
+        public static bool DeletePublication(PublicationEntity publication, bool deleteFile)
         {
-            return DeletePublication(publication.Id);
+            if (deleteFile && File.Exists(publication.ImageFilePath))
+                File.Delete(publication.ImageFilePath);
+
+            Instance.Publications.Remove(publication.Id);
+
+            return true;
         }
 
-        public static bool DeletePublication(string publicationId)
+        public static bool DeletePublication(string publicationId, bool deleteFile)
         {
-            if (Instance.Publications.TryGetValue(publicationId, out var publicaion) && publicaion.State == PublicationState.Moderation)
+            if (Instance.Publications.TryGetValue(publicationId, out var publication))
             {
-                if(File.Exists(publicaion.ImageFilePath))
-                    File.Delete(publicaion.ImageFilePath);
-
-                Instance.Publications.Remove(publicationId);
-                
-                return true;
+                return DeletePublication(publication, deleteFile);
             }
 
             return false;
@@ -160,11 +201,12 @@ namespace SpecialLibraryBot
 
         public static bool ManualProcessingPublication(string publicationId)
         {
-            if (Instance.Publications.TryGetValue(publicationId, out var publicaion) && publicaion.State == PublicationState.Moderation)
+            if (Instance.Publications.TryGetValue(publicationId, out var publication) && publication.State == PublicationState.Moderation)
             {
-                AppDataHelper.MoveToManual(publicaion.SocialNetwork, publicaion.Author, publicaion.ImageFilePath);
+                AppDataHelper.MoveToManual(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
 
-                publicaion.State = PublicationState.ManualProcessing;
+                publication.State = PublicationState.ManualProcessing;
+                publication.StateDateTime = DateTime.UtcNow;
 
                 return true;
             }
@@ -193,6 +235,7 @@ namespace SpecialLibraryBot
             }
 
             publication.State = PublicationState.Published;
+            publication.StateDateTime = DateTime.UtcNow;
             Instance.LastPublicationDateTime = publication.PublicationDateTime.Value;
 
             publication.ImageFilePath = AppDataHelper.MoveToOnWall(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
@@ -222,6 +265,20 @@ namespace SpecialLibraryBot
             return true;
         }
 
+        public static bool ClearOldOnModerationPublications()
+        {
+            var publications = Instance.Publications.Values
+                .Where(x => x.State == PublicationState.Moderation)
+                .Where(x => x.StateDateTime == null || x.StateDateTime <= DateTime.UtcNow.AddDays(-7))
+                .ToList();
+
+            foreach (var publication in publications)
+            {
+                DeletePublication(publication, true);
+            }
+
+            return true;
+        }
 
 
         public static bool MoveToAlbum(PublicationEntity publication)
@@ -237,6 +294,7 @@ namespace SpecialLibraryBot
             }
 
             publication.State = PublicationState.Published;
+            publication.StateDateTime = DateTime.UtcNow;
             publication.PublicationDateTime = DateTime.UtcNow;
 
             //Перемещаем в папку "на стене" чтобы робот потом перенес в альбом
@@ -253,12 +311,13 @@ namespace SpecialLibraryBot
 
         public static bool MoveToInAlbum(string publicationId)
         {
-            if (!Instance.Publications.TryGetValue(publicationId, out var publicaion) || publicaion.State != PublicationState.Moderation)
+            if (!Instance.Publications.TryGetValue(publicationId, out var publication) || publication.State != PublicationState.Moderation)
             {
                 return false;
             }
 
-            AppDataHelper.MoveToInAlbum(publicaion.SocialNetwork, publicaion.Author, publicaion.ImageFilePath);
+            publication.ImageFilePath = AppDataHelper.MoveToInAlbum(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
+            DeletePublication(publication, false);
 
             return true;
         }

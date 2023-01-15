@@ -30,7 +30,9 @@ namespace SpecialLibraryBot
         public DateTime? PublicationDateTime { get; set; }
         public string ImageFilePath { get; set; }
         public PublicationState State { get; set; }
+        public DateTime? StateDateTime { get; set; }
 
+        //Для десериализации
         public PublicationEntity() { }
 
         private PublicationEntity(string author, string socialNetwork, string source, string title, string imageFilePhysicalPath)
@@ -42,6 +44,7 @@ namespace SpecialLibraryBot
             Title = title;
             ImageFilePath = imageFilePhysicalPath;
             State = PublicationState.Downloaded;
+            StateDateTime = DateTime.UtcNow;
         }
 
         public static PublicationEntity DeviantArt( string author, string title, string imageFilePhysicalPath)

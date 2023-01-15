@@ -9,24 +9,24 @@ using System.Threading.Tasks;
 
 namespace SpecialLibraryBot.Services.SchedulerTaskService
 {
-    public class SchedulerTaskAlbumLoader : SchedulerTask
+    public class SchedulerTaskOnModerationPublicationsClear : SchedulerTask
     {
         private DateTime nextExecutionDateTime;
-        private int executionIntervalDays = 1;
+        private int executionIntervalHours = 1;
 
-        private static SchedulerTaskAlbumLoader? instance;
-        public static SchedulerTaskAlbumLoader Instance
+        private static SchedulerTaskOnModerationPublicationsClear? instance;
+        public static SchedulerTaskOnModerationPublicationsClear Instance
         {
             get
             {
                 if (instance == null)
-                    instance = new SchedulerTaskAlbumLoader(LogManager.GetCurrentClassLogger());
+                    instance = new SchedulerTaskOnModerationPublicationsClear(LogManager.GetCurrentClassLogger());
 
                 return instance;
             }
         }
 
-        public SchedulerTaskAlbumLoader(ILogger logger) : base(logger) 
+        public SchedulerTaskOnModerationPublicationsClear(ILogger logger) : base(logger) 
         {
             nextExecutionDateTime = DateTime.MinValue;
         }
@@ -37,10 +37,9 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
             {
                 Logger.Info("Start execute.");
 
-                nextExecutionDateTime = DateTime.UtcNow.AddDays(executionIntervalDays);
+                nextExecutionDateTime = DateTime.UtcNow.AddHours(executionIntervalHours);
 
-                PublicationManager.LoadPublishedPublicationsToAlbums();
-
+                PublicationManager.ClearOldOnModerationPublications();
             }
             catch (Exception ex)
             {
