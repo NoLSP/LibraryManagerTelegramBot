@@ -306,7 +306,10 @@ namespace SpecialLibraryBot
 
         public static bool MoveToInAlbum(PublicationEntity publication)
         {
-            return MoveToInAlbum(publication.Id);
+            publication.ImageFilePath = AppDataHelper.MoveToInAlbum(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
+            DeletePublication(publication, false);
+
+            return true;
         }
 
         public static bool MoveToInAlbum(string publicationId)
@@ -316,10 +319,7 @@ namespace SpecialLibraryBot
                 return false;
             }
 
-            publication.ImageFilePath = AppDataHelper.MoveToInAlbum(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
-            DeletePublication(publication, false);
-
-            return true;
+            return MoveToInAlbum(publication);
         }
 
     }

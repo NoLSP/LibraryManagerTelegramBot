@@ -14,12 +14,6 @@ namespace SpecialLibraryBot
         ManualProcessing //В каталоге ручной обработки
     }
 
-    public class PublicationEntityCallBackDto
-    {
-        public string? PublicationId { get; set; }
-        public string? Action { get; set; }
-    }
-
     public class PublicationEntity
     {
         public string Id { get; set; }

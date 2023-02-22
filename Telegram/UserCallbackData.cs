@@ -17,15 +17,13 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 namespace SpecialLibraryBot.Telegram
 {
-    public enum InlineKeyboardAction
+    public class UserCallbackData
     {
-        Publicate = 0,
-        NotPublicate = 1,
-        ChangeTime = 2,
-        ChangeTitle = 3,
-        ChangeSource = 4,
-        ManualProcessing = 5,
-        MoveToAlbum = 6
-
+        public string? PublicationId { get; set; }
+        public string? Action { get; set; }
+        [JsonIgnore]
+        public long? ChatId { get; set; }
+        [JsonIgnore]
+        public string? Message { get; set; }
     }
 }
