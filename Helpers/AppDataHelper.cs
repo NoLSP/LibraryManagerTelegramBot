@@ -84,6 +84,99 @@ namespace SpecialLibraryBot.Helpers
             }
         }
 
+        public static bool MoveAuthorCatalog(string socialNetwork, string sourceAuthor, string destinationAuthor)
+        {
+            try
+            {
+                var appDataDirectoryInfo = ObtainDirectory(Path.Combine(RootPath, AppDataCatalog.APPDATA));
+                var socialNetworkDirectoryInfo = ObtainDirectory(Path.Combine(appDataDirectoryInfo.FullName, socialNetwork));
+                var sourceAuthorDirectoryInfo = ObtainDirectory(Path.Combine(socialNetworkDirectoryInfo.FullName, sourceAuthor));
+
+                var sourceDownloadedDirectoryInfo = ObtainDirectory(Path.Combine(sourceAuthorDirectoryInfo.FullName, AppDataCatalog.DOWNLOADED));
+                var sourceProcessingDirectoryInfo = ObtainDirectory(Path.Combine(sourceAuthorDirectoryInfo.FullName, AppDataCatalog.PROCESSING));
+                var sourceManualDirectoryInfo = ObtainDirectory(Path.Combine(sourceAuthorDirectoryInfo.FullName, AppDataCatalog.MANUAL));
+                var sourceOnWallDirectoryInfo = ObtainDirectory(Path.Combine(sourceAuthorDirectoryInfo.FullName, AppDataCatalog.ONWALL));
+                var sourceInAlbumDirectoryInfo = ObtainDirectory(Path.Combine(sourceAuthorDirectoryInfo.FullName, AppDataCatalog.INALBUM));
+
+                var destinationAuthorDirectoryInfo = ObtainDirectory(Path.Combine(socialNetworkDirectoryInfo.FullName, destinationAuthor));
+
+                var destinationDownloadedDirectoryInfo = ObtainDirectory(Path.Combine(destinationAuthorDirectoryInfo.FullName, AppDataCatalog.DOWNLOADED));
+                var destinationProcessingDirectoryInfo = ObtainDirectory(Path.Combine(destinationAuthorDirectoryInfo.FullName, AppDataCatalog.PROCESSING));
+                var destinationManualDirectoryInfo = ObtainDirectory(Path.Combine(destinationAuthorDirectoryInfo.FullName, AppDataCatalog.MANUAL));
+                var destinationOnWallDirectoryInfo = ObtainDirectory(Path.Combine(destinationAuthorDirectoryInfo.FullName, AppDataCatalog.ONWALL));
+                var destinationInAlbumDirectoryInfo = ObtainDirectory(Path.Combine(destinationAuthorDirectoryInfo.FullName, AppDataCatalog.INALBUM));
+
+                foreach(var file in sourceDownloadedDirectoryInfo.GetFiles())
+                {
+                    var newFilePath = Path.Combine(destinationDownloadedDirectoryInfo.FullName, file.Name);
+                    if (File.Exists(newFilePath))
+                        File.Delete(newFilePath);
+
+                    File.Move(file.FullName, newFilePath);
+                }
+
+                foreach (var file in sourceProcessingDirectoryInfo.GetFiles())
+                {
+                    var newFilePath = Path.Combine(destinationProcessingDirectoryInfo.FullName, file.Name);
+                    if (File.Exists(newFilePath))
+                        File.Delete(newFilePath);
+
+                    File.Move(file.FullName, newFilePath);
+                }
+
+                foreach (var file in sourceManualDirectoryInfo.GetFiles())
+                {
+                    var newFilePath = Path.Combine(destinationManualDirectoryInfo.FullName, file.Name);
+                    if (File.Exists(newFilePath))
+                        File.Delete(newFilePath);
+
+                    File.Move(file.FullName, newFilePath);
+                }
+
+                foreach (var file in sourceOnWallDirectoryInfo.GetFiles())
+                {
+                    var newFilePath = Path.Combine(destinationOnWallDirectoryInfo.FullName, file.Name);
+                    if (File.Exists(newFilePath))
+                        File.Delete(newFilePath);
+
+                    File.Move(file.FullName, newFilePath);
+                }
+
+                foreach (var file in sourceInAlbumDirectoryInfo.GetFiles())
+                {
+                    var newFilePath = Path.Combine(destinationInAlbumDirectoryInfo.FullName, file.Name);
+                    if (File.Exists(newFilePath))
+                        File.Delete(newFilePath);
+
+                    File.Move(file.FullName, newFilePath);
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e);
+                return false;
+            }
+        }
+
+        public static void DeleteAuthorCatalog(string socialNetwork, string author)
+        {
+            try
+            {
+                var appDataDirectoryInfo = ObtainDirectory(Path.Combine(RootPath, AppDataCatalog.APPDATA));
+                var socialNetworkDirectoryInfo = ObtainDirectory(Path.Combine(appDataDirectoryInfo.FullName, socialNetwork));
+                var authorDirectoryInfo = ObtainDirectory(Path.Combine(socialNetworkDirectoryInfo.FullName, author));
+
+                if(authorDirectoryInfo.Exists)
+                    authorDirectoryInfo.Delete(true);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e);
+                throw e;
+            }
+        }
+
 
         //Publications files manipulations
 
@@ -125,6 +218,14 @@ namespace SpecialLibraryBot.Helpers
             {
                 Logger.Error(e);
                 throw e;
+            }
+        }
+
+        public static void DeletePublicationFile(string filePath)
+        {
+            if(File.Exists(filePath))
+            {
+                File.Delete(filePath);
             }
         }
 

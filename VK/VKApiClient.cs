@@ -89,7 +89,7 @@ namespace SpecialLibraryBot.VK
                     OwnerId = (-1) * (long)groupId,
                     FromGroup = true,
                     Message = publication.Title,
-                    PublishDate = publication.PublicationDateTime,
+                    PublishDate = publication.PublicationDateTime!.Value.AddHours(5),
                     Copyright = publication.Source,
                     Attachments = photos
                 });

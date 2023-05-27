@@ -21,9 +21,9 @@ namespace SpecialLibraryBot.Telegram
     {
         public string? PublicationId { get; set; }
         public string? Action { get; set; }
-        [JsonIgnore]
-        public long? ChatId { get; set; }
-        [JsonIgnore]
+        public long ChatId { get; set; }
         public string? Message { get; set; }
+        public string? SocialNetwork { get; set; }
+        public string? Author { get; set; }
     }
 }

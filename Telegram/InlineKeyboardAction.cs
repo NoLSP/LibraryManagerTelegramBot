@@ -19,17 +19,21 @@ namespace SpecialLibraryBot.Telegram
 {
     public class InlineKeyboardAction
     {
-        public string PublicationId { get; set; }
+        public string? PublicationId { get; set; }
         public long ChatId { get; set; }
         public string Type { get; set; }
+        public string? SocialNetwork { get; set; }
+        public string? Author { get; set; }
         public int Stage { get; set; }
 
-        public InlineKeyboardAction(string publicationId, long chatId, string type,  int stage = 0)
+        public InlineKeyboardAction(string? publicationId, long chatId,string type, int stage = 0, string? socialNetwork = null, string? author = null)
         {
             PublicationId = publicationId;
             ChatId = chatId;
             Type = type;
             Stage = stage;
+            SocialNetwork = socialNetwork;
+            Author = author;
         }
     }
 }

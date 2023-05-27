@@ -12,6 +12,7 @@ using System.Data.SqlTypes;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using VkNet.Model;
 
 namespace SpecialLibraryBot
 {
@@ -21,6 +22,7 @@ namespace SpecialLibraryBot
         private PublicationManagerConfiguration configuration;
 
         public Dictionary<string, PublicationEntity> Publications;
+        private Semaphore Semaphore;
         public DateTime LastPublicationDateTime;
         public TimeOnly StartPublicationTime;
         public TimeOnly EndPublicationTime;
@@ -45,6 +47,7 @@ namespace SpecialLibraryBot
             configuration = ConfigurationService.PublicationManagerConfiguration;
             logger = LogManager.GetCurrentClassLogger();
             vkApiClient = VKApiClient.Instance;
+            Semaphore = new Semaphore(1, 1);
 
             //Сначала пытаемся восставновиться из сохранения
             var publicationManagerDto = AppDataHelper.DeserializePublicationManager();
@@ -67,24 +70,6 @@ namespace SpecialLibraryBot
             }
         }
 
-        public static async Task RegisterPublicationEntity(PublicationEntity publicationEntity)
-        {
-            if (await TelegramBotManager.SendPublicationEntity(publicationEntity))
-            {
-                var newImageFilePath = AppDataHelper.MoveToProcessing(publicationEntity.SocialNetwork, publicationEntity.Author, publicationEntity.ImageFilePath);
-                publicationEntity.ImageFilePath = newImageFilePath;
-                publicationEntity.State = PublicationState.Moderation;
-                publicationEntity.StateDateTime = DateTime.UtcNow;
-            }
-            else
-            {
-                publicationEntity.State = PublicationState.Downloaded;
-                publicationEntity.StateDateTime = DateTime.UtcNow;
-            }
-
-            Instance.Publications.Add(publicationEntity.Id, publicationEntity);
-        }
-
         
         //Publication time managment
         
@@ -93,14 +78,9 @@ namespace SpecialLibraryBot
             if (Instance.LastPublicationDateTime.Date < DateTime.UtcNow.Date)
                 Instance.LastPublicationDateTime = DateTime.UtcNow;
 
-            var publicationDateTime = (DateTime?)Instance.LastPublicationDateTime.AddMinutes(Instance.PublicationIntervalMinutes);
-
-            if (!IsDateInActualPublicationPeriod(publicationDateTime.Value))
-            {
-                publicationDateTime = GetOccurrence(Instance.LastPublicationDateTime, Instance.StartPublicationTime, Instance.EndPublicationTime, Instance.PublicationIntervalMinutes, out var reason);//GetStartDateTimeInNextPeriod(publicationDateTime);
-                if (publicationDateTime == null)
-                    throw new Exception($"Could not get next publication datetime. LastPublicationDateTime = {Instance.LastPublicationDateTime}, StartTime = {Instance.StartPublicationTime}, EndTime = {Instance.EndPublicationTime}, IntervalMinutes = {Instance.PublicationIntervalMinutes}");
-            }
+            var publicationDateTime = GetOccurrence(Instance.LastPublicationDateTime, Instance.StartPublicationTime, Instance.EndPublicationTime, Instance.PublicationIntervalMinutes, out var reason);
+            if (publicationDateTime == null)
+                throw new Exception($"Could not get next publication datetime. LastPublicationDateTime = {Instance.LastPublicationDateTime}, StartTime = {Instance.StartPublicationTime}, EndTime = {Instance.EndPublicationTime}, IntervalMinutes = {Instance.PublicationIntervalMinutes}");
 
             return publicationDateTime.Value;
         }
@@ -159,50 +139,181 @@ namespace SpecialLibraryBot
 
         //Publication manipulations
 
+        public static async Task<bool> RegisterPublicationEntity(PublicationEntity publicationEntity)
+        {
+            Instance.Semaphore.WaitOne();
+
+            try
+            {
+                if (await TelegramBotManager.SendPublicationEntity(publicationEntity))
+                {
+                    var newImageFilePath = AppDataHelper.MoveToProcessing(publicationEntity.SocialNetwork, publicationEntity.Author, publicationEntity.ImageFilePath);
+                    publicationEntity.ImageFilePath = newImageFilePath;
+                    publicationEntity.State = PublicationState.Moderation;
+                    publicationEntity.StateDateTime = DateTime.UtcNow;
+                }
+                else
+                {
+                    publicationEntity.State = PublicationState.Downloaded;
+                    publicationEntity.StateDateTime = DateTime.UtcNow;
+                }
+
+                Instance.Publications.Add(publicationEntity.Id, publicationEntity);
+                return true;
+
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
+        }
+
+        public static bool ChangeAuthorCatalog(string authorOldName, string authorNewName)
+        {
+            Instance.Semaphore.WaitOne();
+
+            try
+            {
+                foreach (var publication in instance!.Publications.Values.Where(x => x.Author == authorOldName))
+                {
+                    publication.ImageFilePath.Replace(authorOldName, authorNewName);
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
+        }
+
+        public static bool DeleteAuthorPublications(string authorName)
+        {
+            Instance.Semaphore.WaitOne();
+
+            try
+            { 
+                var publicationsToDeleteIds = instance!.Publications.Values
+                    .Where(x => x.Author == authorName)
+                    .Select(x => x.Id);
+
+                foreach (var publicationId in publicationsToDeleteIds)
+                {
+                    instance!.Publications.Remove(publicationId);
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
+        }
+
         public static bool ObtainAuthorsAlbums(List<string> authors, out string reason)
         {
             return Instance.vkApiClient.ObtainAlbums(authors, out reason);
         }
 
-        public static PublicationEntity? GetPublicationEntity(string id)
+        public static bool TryGetPublicationEntity(string id, out PublicationEntity? publication)
         {
-            if (Instance.Publications.TryGetValue(id, out var publication))
-                return publication;
+            Instance.Semaphore.WaitOne();
 
-            return null;
+            try
+            { 
+                if (Instance.Publications.TryGetValue(id, out publication))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                publication = null;
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
 
         public static bool DeletePublication(PublicationEntity publication, bool deleteFile)
         {
-            if (deleteFile && File.Exists(publication.ImageFilePath))
-                File.Delete(publication.ImageFilePath);
+            Instance.Semaphore.WaitOne();
 
-            Instance.Publications.Remove(publication.Id);
+            try
+            { 
+                if (deleteFile)
+                    AppDataHelper.DeletePublicationFile(publication.ImageFilePath);
 
-            return true;
+                Instance.Publications.Remove(publication.Id);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
         public static bool DeletePublication(string publicationId, bool deleteFile)
         {
-            if (Instance.Publications.TryGetValue(publicationId, out var publication))
-            {
-                return DeletePublication(publication, deleteFile);
-            }
+            Instance.Semaphore.WaitOne();
 
-            return false;
+            try
+            {
+                if (Instance.Publications.TryGetValue(publicationId, out var publication))
+                {
+                    Instance.Semaphore.Release();
+                    return DeletePublication(publication, deleteFile);
+                }
+
+                return false;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
 
         public static bool ManualProcessingPublication(PublicationEntity publication)
         {
-            return ManualProcessingPublication(publication.Id);
-        }
+            Instance.Semaphore.WaitOne();
 
-        public static bool ManualProcessingPublication(string publicationId)
-        {
-            if (Instance.Publications.TryGetValue(publicationId, out var publication) && publication.State == PublicationState.Moderation)
+            try
             {
+                if(publication.State != PublicationState.Moderation)
+                    return false;
+
                 AppDataHelper.MoveToManual(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
 
                 publication.State = PublicationState.ManualProcessing;
@@ -210,56 +321,117 @@ namespace SpecialLibraryBot
 
                 return true;
             }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
+        }
 
-            return false;
+        public static bool ManualProcessingPublication(string publicationId)
+        {
+            Instance.Semaphore.WaitOne();
+
+            try
+            {
+                if (Instance.Publications.TryGetValue(publicationId, out var publication))
+                {
+                    Instance.Semaphore.Release();
+                    return ManualProcessingPublication(publication);
+                }
+
+                return false;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
 
         public static bool PublicatePublication(PublicationEntity publication)
         {
-            return PublicatePublication(publication.Id);
+            Instance.Semaphore.WaitOne();
+
+            try
+            {
+                if (publication.State != PublicationState.Moderation)
+                    return false;
+
+                publication.PublicationDateTime = GetActualPublicationDateTime();
+
+                if (!Instance.vkApiClient.PostPublication(publication))
+                {
+                    return false;
+                }
+
+                publication.State = PublicationState.Published;
+                publication.StateDateTime = DateTime.UtcNow;
+                Instance.LastPublicationDateTime = publication.PublicationDateTime.Value;
+
+                publication.ImageFilePath = AppDataHelper.MoveToOnWall(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
         public static bool PublicatePublication(string publicationId)
         {
-            if (!Instance.Publications.TryGetValue(publicationId, out var publication) || publication.State != PublicationState.Moderation)
+            Instance.Semaphore.WaitOne();
+
+            try
             {
+                if (Instance.Publications.TryGetValue(publicationId, out var publication))
+                {
+                    Instance.Semaphore.Release();
+                    return PublicatePublication(publication);
+                }
+
                 return false;
             }
-
-            publication.PublicationDateTime = GetActualPublicationDateTime();
-
-            if(!Instance.vkApiClient.PostPublication(publication))
+            catch (Exception e)
             {
+                Instance.logger.Error(e);
                 return false;
             }
-
-            publication.State = PublicationState.Published;
-            publication.StateDateTime = DateTime.UtcNow;
-            Instance.LastPublicationDateTime = publication.PublicationDateTime.Value;
-
-            publication.ImageFilePath = AppDataHelper.MoveToOnWall(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
-
-            return true;
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
 
         public static bool LoadPublishedPublicationsToAlbums()
         {
+            Instance.Semaphore.WaitOne();
+
             var publications = Instance.Publications.Values
                 .Where(x => x.State == PublicationState.Published)
                 .ToList();
 
-            foreach(var publication in publications)
-            {
-                if(!Instance.vkApiClient.LoadPhotosToAlbum(publication.Author, new List<string>() { publication.ImageFilePath }, out var reason))
-                {
-                    Instance.logger.Error(reason);
-                    continue;
-                }
+            Instance.Semaphore.Release();
 
-                MoveToInAlbum(publication);
-                Instance.Publications.Remove(publication.Id);
+            foreach (var publication in publications)
+            {
+                PublicateToAlbum(publication);
             }
 
             return true;
@@ -267,10 +439,14 @@ namespace SpecialLibraryBot
 
         public static bool ClearOldOnModerationPublications()
         {
+            Instance.Semaphore.WaitOne();
+
             var publications = Instance.Publications.Values
                 .Where(x => x.State == PublicationState.Moderation)
                 .Where(x => x.StateDateTime == null || x.StateDateTime <= DateTime.UtcNow.AddDays(-7))
                 .ToList();
+
+            Instance.Semaphore.Release();
 
             foreach (var publication in publications)
             {
@@ -283,43 +459,83 @@ namespace SpecialLibraryBot
 
         public static bool MoveToAlbum(PublicationEntity publication)
         {
-            return MoveToAlbum(publication.Id);
+            Instance.Semaphore.WaitOne();
+
+            try
+            {
+                if (publication.State != PublicationState.Moderation)
+                    return false;
+
+                publication.State = PublicationState.Published;
+                publication.StateDateTime = DateTime.UtcNow;
+                publication.PublicationDateTime = DateTime.UtcNow;
+
+                //Перемещаем в папку "на стене" чтобы робот потом перенес в альбом
+                publication.ImageFilePath = AppDataHelper.MoveToOnWall(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
         public static bool MoveToAlbum(string publicationId)
         {
-            if (!Instance.Publications.TryGetValue(publicationId, out var publication) || publication.State != PublicationState.Moderation)
+            Instance.Semaphore.WaitOne();
+
+            try
             {
+                if (Instance.Publications.TryGetValue(publicationId, out var publication))
+                {
+                    Instance.Semaphore.Release();
+                    return MoveToAlbum(publication);
+                }
+
                 return false;
             }
-
-            publication.State = PublicationState.Published;
-            publication.StateDateTime = DateTime.UtcNow;
-            publication.PublicationDateTime = DateTime.UtcNow;
-
-            //Перемещаем в папку "на стене" чтобы робот потом перенес в альбом
-            publication.ImageFilePath = AppDataHelper.MoveToOnWall(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
-
-            return true;
+            catch (Exception e)
+            {
+                Instance.logger.Error(e);
+                return false;
+            }
+            finally
+            {
+                Instance.Semaphore.Release();
+            }
         }
 
 
-        public static bool MoveToInAlbum(PublicationEntity publication)
+        public static bool PublicateToAlbum(PublicationEntity publication)
         {
+            if(publication.State != PublicationState.Published)
+                return false;
+
+            if (!Instance.vkApiClient.LoadPhotosToAlbum(publication.Author, new List<string>() { publication.ImageFilePath }, out var reason))
+            {
+                Instance.logger.Error(reason);
+                return false;
+            }
             publication.ImageFilePath = AppDataHelper.MoveToInAlbum(publication.SocialNetwork, publication.Author, publication.ImageFilePath);
             DeletePublication(publication, false);
 
             return true;
         }
 
-        public static bool MoveToInAlbum(string publicationId)
+        public static bool PublicateToAlbum(string publicationId)
         {
-            if (!Instance.Publications.TryGetValue(publicationId, out var publication) || publication.State != PublicationState.Moderation)
+            if (Instance.Publications.TryGetValue(publicationId, out var publication))
             {
-                return false;
+                return PublicateToAlbum(publication);
             }
 
-            return MoveToInAlbum(publication);
+            return false;
         }
 
     }

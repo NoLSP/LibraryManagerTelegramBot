@@ -112,19 +112,7 @@ namespace SpecialLibraryBot.Telegram
             if (message.Text == null)
                 return;
 
-            if (message.Text.ToLower() == "/start")
-            {
-                await botClient.SendTextMessageAsync(message.Chat, "Привет, манагер лучшей группы в мире!");
-                return;
-            }
-
-            var userCallbackData = new UserCallbackData
-            {
-                ChatId = chatId,
-                Message = message.Text
-            };
-
-            await InlineKeyboardActionManager.HndleCurrentAction(userCallbackData);
+            await InlineKeyboardActionManager.HandleAction(chatId, message.Text);
 
             //await botClient.SendTextMessageAsync(message.Chat, "/help чтобы узнать, что тут к чему");
         }
@@ -139,10 +127,7 @@ namespace SpecialLibraryBot.Telegram
             if (String.IsNullOrWhiteSpace(callbackData))
                 return;
 
-            var userCallbackData = JsonConvert.DeserializeObject<UserCallbackData>(callbackData);
-            userCallbackData!.ChatId = chatId;
-
-            await InlineKeyboardActionManager.HndleAction(userCallbackData!.Action!, userCallbackData!);
+            await InlineKeyboardActionManager.HandleAction(callbackData);
         }
 
 
@@ -151,6 +136,11 @@ namespace SpecialLibraryBot.Telegram
         public static async Task SendTextMessageAsync(long chatId, string responseText)
         {
             await Instance.telegramBotClient.SendTextMessageAsync(chatId, responseText);
+        }
+
+        public static async Task SendTextMessageWithKeyboardAsync(long chatId, string message, InlineKeyboardMarkup keyboard)
+        {
+            await Instance.telegramBotClient.SendTextMessageAsync(chatId, message, replyMarkup: keyboard);
         }
 
         public static async Task<bool> SendPublicationEntity(PublicationEntity publication)
@@ -166,7 +156,7 @@ namespace SpecialLibraryBot.Telegram
                     using (var fileStream = new FileStream(publication.ImageFilePath, FileMode.Open))
                     {
                         var file = new InputOnlineFile(fileStream);
-                        var keyboard = InlineKeyboardActionManager.GetStandartPublicationKeyboardMurkup(publication.Id);
+                        var keyboard = InlineKeyboardActionManager.GetStandartPublicationKeyboardMurkup(chatId, publication.Id);
                         await Instance.telegramBotClient.SendPhotoAsync(chatId, file, messageText, replyMarkup: keyboard);
                     }
                 }

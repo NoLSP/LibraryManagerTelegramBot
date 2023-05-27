@@ -16,6 +16,7 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
         private int executionIntervalMinutes = 10;
         public Dictionary<string, DateTime> AuthorsLastArtsDates;
         public List<string> Authors;
+        private static Semaphore Semaphore = new Semaphore(1, 1);
         private DeviantArtConfiguration configuration;
         public DateTime LastUpdateDateTime;
 
@@ -66,17 +67,86 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
                 logger.Error(reason);
         }
 
+        public static bool AddAuthor(string authorName, out string reason)
+        {
+            Semaphore.WaitOne();
+            if (instance!.Authors.Contains(authorName))
+            {
+                reason = "Автор с таким имененем уже есть в базе.";
+                Semaphore.Release();
+                return false;
+            }
+
+            instance!.Authors.Add(authorName);
+            instance!.AuthorsLastArtsDates.Add(authorName, new DateTime());
+            AppDataHelper.ObtainCatalogsStructure(new Dictionary<string, List<string>>()
+            {
+                ["DeviantArt"] = instance!.Authors
+            });
+            reason = "";
+            Semaphore.Release();
+            return true;
+        }
+
+        public static bool EditAuthor(string authorOldName, string authorNewName, out string reason)
+        {
+            Semaphore.WaitOne();
+            if (!instance!.Authors.Contains(authorOldName))
+            {
+                reason = "Автор с таким имененем не найден в базе.";
+                Semaphore.Release();
+                return false;
+            }
+
+            if (instance!.Authors.Contains(authorNewName))
+            {
+                reason = "Автор с таким имененем уже есть в базе.";
+                Semaphore.Release();
+                return false;
+            }
+
+            instance!.Authors.Remove(authorOldName);
+            instance!.Authors.Add(authorNewName);
+            instance!.AuthorsLastArtsDates[authorNewName] = instance!.AuthorsLastArtsDates[authorOldName];
+            instance!.AuthorsLastArtsDates.Remove(authorOldName);
+
+            AppDataHelper.MoveAuthorCatalog("DeviantArt", authorOldName, authorNewName);
+            PublicationManager.ChangeAuthorCatalog(authorOldName, authorNewName);
+
+            reason = "";
+            Semaphore.Release();
+            return true;
+        }
+
+        public static bool DeleteAuthor(string authorName, out string reason)
+        {
+            Semaphore.WaitOne();
+            if (!instance!.Authors.Contains(authorName))
+            {
+                reason = "Автор с таким имененем не найден в базе.";
+                Semaphore.Release();
+                return false;
+            }
+
+            instance!.Authors.Remove(authorName);
+            instance!.AuthorsLastArtsDates.Remove(authorName);
+            AppDataHelper.DeleteAuthorCatalog("DeviantArt", authorName);
+            reason = "";
+            Semaphore.Release();
+            return true;
+        }
+
         public override async Task Execute()
         {
+            Semaphore.WaitOne();
             Logger.Info("Start execute.");
 
-            nextExecutionDateTime = DateTime.UtcNow.AddMinutes(executionIntervalMinutes);
 
             var deviantArtApiClient = DeviantArtApiClient.Instance;
 
-            foreach(var author in Authors)
+            foreach (var author in Authors)
             {
-                if(!AuthorsLastArtsDates.TryGetValue(author, out var lastArtsDate))
+                if (!AuthorsLastArtsDates.TryGetValue(author, out var lastArtsDate))
                 {
                     lastArtsDate = LastUpdateDateTime;
                 }
@@ -87,27 +157,33 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
 
                 try
                 {
-                    while(hasMoreWorks)
+                    while (hasMoreWorks)
                     {
                         var authorGallary = await deviantArtApiClient.GalleryAll(author, pageOffset: pageOffset);
 
-                        if(authorGallary.Results == null)
+                        if (authorGallary.Results == null)
                         {
                             Logger.Error($"Author ({author}) gallary deviantions was null.");
                             break;
                         }
 
-                        for(var i = 0; i < authorGallary.Results.Length; i++)
+                        if (authorGallary.Results.Length == 0)
+                        {
+                            hasMoreWorks = false;
+                            break;
+                        }
+
+                        for (var i = 0; i < authorGallary.Results.Length; i++)
                         {
                             var deviationJson = authorGallary.Results[i];
-                            if(deviationJson.PublishedDateTime == null || deviationJson.PublishedDateTime <= lastArtsDate)
+                            if (deviationJson.PublishedDateTime == null || deviationJson.PublishedDateTime <= lastArtsDate)
                             {
                                 hasMoreWorks = false;
                                 break;
                             }
 
                             var imageDownloadUrl = deviationJson.Content?.SourceUri;
-                            if(imageDownloadUrl == null)
+                            if (imageDownloadUrl == null)
                             {
                                 Logger.Error($"ImageUrl was null {author}.");
                             }
@@ -150,6 +226,10 @@ namespace SpecialLibraryBot.Services.SchedulerTaskService
                     await TelegramBotManager.SendException($"Выгрузка автора {author}", ex.Message);
                 }
             }
+
+            nextExecutionDateTime = DateTime.UtcNow.AddMinutes(executionIntervalMinutes);
+
+            Semaphore.Release();
         }
 
         public override DateTime NextExecutionDateTime()
